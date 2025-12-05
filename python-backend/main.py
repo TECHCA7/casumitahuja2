@@ -27,6 +27,10 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
 
+@app.route('/')
+def index():
+    return jsonify({"message": "PDF API is running. Use /api/health to check status."})
+
 UPLOAD_FOLDER = tempfile.gettempdir()
 ALLOWED_EXTENSIONS = {'pdf'}
 ALLOWED_OCR_EXTENSIONS = {'pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'}
