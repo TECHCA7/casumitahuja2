@@ -63,11 +63,23 @@ export default function TaxCalculator() {
   const { toast } = useToast();
 
   const calculateTax = () => {
+    const salaryIncome = parseFloat(income.salary || "0");
     const totalIncome =
-      parseFloat(income.salary || "0") +
+      salaryIncome +
       parseFloat(income.business || "0") +
       parseFloat(income.capitalGains || "0") +
       parseFloat(income.otherIncome || "0");
+
+    // Calculate Standard Deduction (Only applicable to Salary Income)
+    let standardDeduction = 0;
+    if (salaryIncome > 0) {
+      let limit = 50000;
+      // Increased to 75,000 for New Regime in AY 2025-26
+      if (regime === "new" && assessmentYear === "2025-26") {
+        limit = 75000;
+      }
+      standardDeduction = Math.min(salaryIncome, limit);
+    }
 
     let totalDeductions = 0;
     if (regime === "old") {
@@ -76,10 +88,11 @@ export default function TaxCalculator() {
         Math.min(parseFloat(deductions.section80D || "0"), 75000) +
         parseFloat(deductions.section80G || "0") +
         parseFloat(deductions.hra || "0") +
-        parseFloat(deductions.other || "0");
+        parseFloat(deductions.other || "0") +
+        standardDeduction;
     } else {
-      // New regime has standard deduction of 50,000
-      totalDeductions = 50000;
+      // New regime only allows Standard Deduction for salary
+      totalDeductions = standardDeduction;
     }
 
     const taxableIncome = Math.max(0, totalIncome - totalDeductions);

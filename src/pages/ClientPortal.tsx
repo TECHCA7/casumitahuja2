@@ -44,7 +44,8 @@ export default function ClientPortal() {
 
       if (client.user_id) {
         // Client has an account - sign them in
-        const clientEmail = `${formData.pan.toLowerCase()}@client.office.local`;
+        // Use a standard domain to avoid validation errors
+        const clientEmail = `${formData.pan.toLowerCase().trim()}@client.app`;
         
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: clientEmail,
@@ -65,7 +66,7 @@ export default function ClientPortal() {
         navigate("/documents");
       } else {
         // No user_id means client hasn't logged in before - create or sign in
-        const clientEmail = `${formData.pan.toLowerCase()}@client.office.local`;
+        const clientEmail = `${formData.pan.toLowerCase().trim()}@client.app`;
         const clientPassword = `client_${client.client_id}_${formData.clientCode}`;
 
         // First try to sign in (in case user exists but client_auth link is missing)
