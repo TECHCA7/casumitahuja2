@@ -1,0 +1,11 @@
+flask
+flask-cors
+PyPDF2
+pdf2docx
+pymupdf
+openpyxl
+python-docx
+google-generativeai
+python-dotenv
+werkzeug
+gunicorn
