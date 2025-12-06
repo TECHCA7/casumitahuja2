@@ -52,18 +52,29 @@ export default function OfficeTasks() {
   });
 
   useEffect(() => {
-    fetchTasks();
-    fetchStaffMembers();
-  }, []);
+    if (user) {
+      fetchTasks();
+      fetchStaffMembers();
+    }
+  }, [user, isAdmin]);
 
   const fetchTasks = async () => {
-    const { data, error } = await supabase
+    let query = supabase
       .from("office_tasks")
       .select("*")
       .order("created_at", { ascending: false });
 
+    // If not admin, filter tasks in the frontend query as well
+    // Note: RLS allows staff to view all tasks, but we only want to show relevant ones
+    if (!isAdmin && user) {
+      query = query.or(`assigned_to.eq.${user.id},created_by.eq.${user.id}`);
+    }
+
+    const { data, error } = await query;
+
     if (error) {
-      toast({ title: "Error fetching tasks", variant: "destructive" });
+      console.error("Error fetching tasks:", error);
+      toast({ title: "Error fetching tasks", description: error.message, variant: "destructive" });
     } else {
       setTasks(data || []);
     }
@@ -75,7 +86,10 @@ export default function OfficeTasks() {
       .from("profiles")
       .select("id, full_name");
 
-    if (!error && data) {
+    if (error) {
+      console.error("Error fetching staff members:", error);
+      toast({ title: "Error fetching staff list", description: error.message, variant: "destructive" });
+    } else if (data) {
       setStaffMembers(data);
     }
   };
@@ -86,20 +100,22 @@ export default function OfficeTasks() {
       return;
     }
 
+    const taskData = {
+      title: formData.title,
+      description: formData.description || null,
+      assigned_to: isAdmin ? (formData.assigned_to || null) : user?.id,
+      priority: formData.priority,
+      due_date: formData.due_date || null,
+    };
+
     if (editingTask) {
-      if (!isAdmin) {
-        toast({ title: "Only admin can update tasks", variant: "destructive" });
+      if (!isAdmin && editingTask.created_by !== user?.id) {
+        toast({ title: "You can only edit your own tasks", variant: "destructive" });
         return;
       }
       const { error } = await supabase
         .from("office_tasks")
-        .update({
-          title: formData.title,
-          description: formData.description || null,
-          assigned_to: formData.assigned_to || null,
-          priority: formData.priority,
-          due_date: formData.due_date || null,
-        })
+        .update(taskData)
         .eq("id", editingTask.id);
 
       if (error) {
@@ -110,12 +126,8 @@ export default function OfficeTasks() {
       }
     } else {
       const { error } = await supabase.from("office_tasks").insert({
-        title: formData.title,
-        description: formData.description || null,
-        assigned_to: formData.assigned_to || null,
+        ...taskData,
         created_by: user?.id,
-        priority: formData.priority,
-        due_date: formData.due_date || null,
       });
 
       if (error) {
@@ -131,8 +143,20 @@ export default function OfficeTasks() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!isAdmin) {
-      toast({ title: "Only admin can delete tasks", variant: "destructive" });
+    // Allow delete if admin OR creator
+    // We need to check the task first, but here we only have ID.
+    // Assuming the UI only shows delete button if allowed.
+    // But for safety, we should check.
+    // Since we don't have the task object here easily without fetching or passing it,
+    // and the UI already restricts the button, we'll rely on RLS (if set) or just the UI check for now.
+    // But wait, the original code checked isAdmin.
+    // I'll update it to check if the task belongs to user if not admin.
+    // Actually, let's just check the task from the state.
+    const taskToDelete = tasks.find(t => t.id === id);
+    if (!taskToDelete) return;
+
+    if (!isAdmin && taskToDelete.created_by !== user?.id) {
+      toast({ title: "You can only delete your own tasks", variant: "destructive" });
       return;
     }
     const { error } = await supabase.from("office_tasks").delete().eq("id", id);
@@ -145,8 +169,9 @@ export default function OfficeTasks() {
   };
 
   const toggleStatus = async (task: Task) => {
-    if (!isAdmin) {
-      toast({ title: "Only admin can update task status", variant: "destructive" });
+    const canToggle = isAdmin || task.assigned_to === user?.id;
+    if (!canToggle) {
+      toast({ title: "You can only update status of tasks assigned to you", variant: "destructive" });
       return;
     }
     const newStatus = task.status === "completed" ? "pending" : "completed";
@@ -155,7 +180,10 @@ export default function OfficeTasks() {
       .update({ status: newStatus })
       .eq("id", task.id);
     
-    if (!error) {
+    if (error) {
+      console.error("Error updating task status:", error);
+      toast({ title: "Error updating status", description: error.message, variant: "destructive" });
+    } else {
       fetchTasks();
     }
   };
@@ -166,8 +194,8 @@ export default function OfficeTasks() {
   };
 
   const openEditDialog = (task: Task) => {
-    if (!isAdmin) {
-      toast({ title: "Only admin can edit tasks", variant: "destructive" });
+    if (!isAdmin && task.created_by !== user?.id) {
+      toast({ title: "You can only edit your own tasks", variant: "destructive" });
       return;
     }
     setEditingTask(task);
@@ -220,7 +248,6 @@ export default function OfficeTasks() {
               <SelectItem value="all">All Tasks</SelectItem>
               <SelectItem value="my">My Tasks</SelectItem>
               <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="in_progress">In Progress</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
             </SelectContent>
           </Select>
@@ -255,22 +282,24 @@ export default function OfficeTasks() {
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Assign To</Label>
-                    <Select value={formData.assigned_to} onValueChange={(v) => setFormData({ ...formData, assigned_to: v })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select staff" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {staffMembers.map((staff) => (
-                          <SelectItem key={staff.id} value={staff.id}>
-                            {staff.full_name || "Unnamed"}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
+                  {isAdmin && (
+                    <div>
+                      <Label>Assign To</Label>
+                      <Select value={formData.assigned_to} onValueChange={(v) => setFormData({ ...formData, assigned_to: v })}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select staff" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {staffMembers.map((staff) => (
+                            <SelectItem key={staff.id} value={staff.id}>
+                              {staff.full_name || "Unnamed"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  <div className={isAdmin ? "" : "col-span-2"}>
                     <Label>Priority</Label>
                     <Select value={formData.priority} onValueChange={(v) => setFormData({ ...formData, priority: v })}>
                       <SelectTrigger>
@@ -307,25 +336,44 @@ export default function OfficeTasks() {
       ) : filteredTasks.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            No tasks found. Create your first task!
+            <p>No tasks found. Create your first task!</p>
+            <div className="mt-4 p-2 bg-muted/50 rounded text-xs font-mono inline-block text-left">
+              <p>Debug Info:</p>
+              <p>User ID: {user?.id}</p>
+              <p>Role: {isAdmin ? 'Admin' : 'Staff'}</p>
+            </div>
           </CardContent>
         </Card>
       ) : (
         <div className="grid gap-4">
           {filteredTasks.map((task) => (
-            <Card key={task.id} className={task.status === "completed" ? "opacity-60" : ""}>
+            <Card key={task.id} className={task.status === "completed" ? "bg-muted/30" : ""}>
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <button onClick={() => toggleStatus(task)} disabled={!isAdmin}>
-                      <CheckCircle
-                        className={`w-6 h-6 ${task.status === "completed" ? "text-green-500 fill-green-500" : "text-muted-foreground"}`}
-                      />
+                    <button 
+                      onClick={() => toggleStatus(task)} 
+                      disabled={!isAdmin && task.assigned_to !== user?.id}
+                      className="transition-transform active:scale-95 focus:outline-none"
+                      title={task.status === "completed" ? "Mark as pending" : "Mark as completed"}
+                    >
+                      {task.status === "completed" ? (
+                        <CheckCircle className="w-6 h-6 text-white fill-green-600" />
+                      ) : (
+                        <div className="w-6 h-6 rounded-full border-2 border-muted-foreground hover:border-green-600 transition-colors" />
+                      )}
                     </button>
                     <div>
-                      <CardTitle className={`text-lg ${task.status === "completed" ? "line-through" : ""}`}>
-                        {task.title}
-                      </CardTitle>
+                      <div className="flex items-center gap-2">
+                        <CardTitle className={`text-lg ${task.status === "completed" ? "text-muted-foreground line-through" : ""}`}>
+                          {task.title}
+                        </CardTitle>
+                        {task.status === "completed" && (
+                          <Badge variant="secondary" className="bg-green-100 text-green-800 hover:bg-green-100">
+                            Completed
+                          </Badge>
+                        )}
+                      </div>
                       {task.description && (
                         <CardDescription className="mt-1">{task.description}</CardDescription>
                       )}
@@ -335,7 +383,7 @@ export default function OfficeTasks() {
                     <Badge className={`${getPriorityColor(task.priority)} text-white`}>
                       {task.priority}
                     </Badge>
-                    {isAdmin && (
+                    {(isAdmin || task.created_by === user?.id) && (
                       <>
                         <Button variant="ghost" size="icon" onClick={() => openEditDialog(task)}>
                           <Edit className="w-4 h-4" />

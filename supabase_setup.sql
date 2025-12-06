@@ -322,8 +322,9 @@ CREATE TRIGGER update_invoices_updated_at BEFORE UPDATE ON public.invoices FOR E
 -- 6. RLS Policies
 
 -- Profiles
-CREATE POLICY "Users can view own profile" ON public.profiles
-FOR SELECT USING (auth.uid() = id);
+-- Allow all authenticated users to view all profiles (needed for task assignment etc)
+CREATE POLICY "Authenticated users can view all profiles" ON public.profiles
+FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Users can update own profile" ON public.profiles
 FOR UPDATE USING (auth.uid() = id);
@@ -333,14 +334,19 @@ CREATE POLICY "Users can view own role" ON public.user_roles
 FOR SELECT USING (auth.uid() = user_id);
 
 -- Clients
-CREATE POLICY "Staff can view all clients" ON public.clients
+CREATE POLICY "Staff and Clients view policy" ON public.clients
 FOR SELECT USING (
-  public.is_staff(auth.uid()) OR 
-  (public.has_role(auth.uid(), 'client') AND id = public.get_user_client_id(auth.uid()))
+  -- User is NOT a client (so they are staff/admin)
+  NOT EXISTS (SELECT 1 FROM public.client_auth WHERE user_id = auth.uid())
+  OR 
+  -- User IS a client, can only see their own record
+  id IN (SELECT client_id FROM public.client_auth WHERE user_id = auth.uid())
 );
 
 CREATE POLICY "Staff can create clients" ON public.clients
-FOR INSERT WITH CHECK (public.is_staff(auth.uid()));
+FOR INSERT WITH CHECK (
+  NOT EXISTS (SELECT 1 FROM public.client_auth WHERE user_id = auth.uid())
+);
 
 CREATE POLICY "Admin can update clients" ON public.clients
 FOR UPDATE USING (public.is_admin(auth.uid()));
@@ -367,9 +373,9 @@ FOR SELECT USING (
   public.is_admin(auth.uid()) OR auth.uid() = user_id
 );
 
-CREATE POLICY "Staff can create own attendance" ON public.attendance
+CREATE POLICY "Users can create own attendance" ON public.attendance
 FOR INSERT WITH CHECK (
-  public.is_staff(auth.uid()) AND auth.uid() = user_id
+  auth.uid() = user_id
 );
 
 CREATE POLICY "Staff can update own attendance" ON public.attendance
@@ -404,14 +410,22 @@ CREATE POLICY "Admin can delete invoice items" ON public.invoice_items
 FOR DELETE USING (public.is_admin(auth.uid()));
 
 -- Office Tasks
-CREATE POLICY "Staff can view all tasks" ON public.office_tasks
-FOR SELECT USING (public.is_staff(auth.uid()));
+CREATE POLICY "Users can view relevant tasks" ON public.office_tasks
+FOR SELECT USING (
+  public.is_admin(auth.uid()) OR 
+  assigned_to = auth.uid() OR 
+  created_by = auth.uid()
+);
 
 CREATE POLICY "Staff can create tasks" ON public.office_tasks
 FOR INSERT WITH CHECK (public.is_staff(auth.uid()));
 
-CREATE POLICY "Admin can update tasks" ON public.office_tasks
-FOR UPDATE USING (public.is_admin(auth.uid()));
+CREATE POLICY "Staff can update own tasks" ON public.office_tasks
+FOR UPDATE USING (
+  public.is_admin(auth.uid()) OR 
+  assigned_to = auth.uid() OR
+  created_by = auth.uid()
+);
 
 CREATE POLICY "Admin can delete tasks" ON public.office_tasks
 FOR DELETE USING (public.is_admin(auth.uid()));
@@ -460,4 +474,4 @@ USING (
 );
 
 -- 8. Initial Data
-INSERT INTO public.staff_codes (code) VALUES ('STAFF2024') ON CONFLICT (code) DO NOTHING;
+INSERT INTO public.staff_codes (code) VALUES ('OFFICE2025') ON CONFLICT (code) DO NOTHING;

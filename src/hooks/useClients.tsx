@@ -40,8 +40,10 @@ export function useClients() {
       .order("created_at", { ascending: false });
 
     if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      console.error("Error fetching clients:", error);
+      toast({ title: "Error fetching clients", description: error.message, variant: "destructive" });
     } else {
+      console.log("Clients fetched:", data?.length);
       setClients(data || []);
     }
     setLoading(false);

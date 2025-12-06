@@ -87,6 +87,7 @@ export default function OCR() {
       });
 
       if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
       if (data?.text) {
         setExtractedText(data.text);
