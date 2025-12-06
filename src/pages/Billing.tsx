@@ -100,86 +100,100 @@ export default function Billing() {
   };
 
   const generatePDF = async (invoice: typeof invoices[0]) => {
-    const client = clients.find(c => c.id === invoice.client_id);
-    const pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([595, 842]); // A4 size
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    
-    const { height } = page.getSize();
-    let y = height - 50;
+    try {
+      const client = clients.find(c => c.id === invoice.client_id);
+      const pdfDoc = await PDFDocument.create();
+      const page = pdfDoc.addPage([595, 842]); // A4 size
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      
+      const { height } = page.getSize();
+      let y = height - 50;
 
-    // Header
-    page.drawText("TAX INVOICE", { x: 230, y, size: 20, font: boldFont, color: rgb(0.2, 0.2, 0.2) });
-    y -= 40;
+      // Header
+      page.drawText("TAX INVOICE", { x: 230, y, size: 20, font: boldFont, color: rgb(0.2, 0.2, 0.2) });
+      y -= 40;
 
-    // Invoice details
-    page.drawText(`Invoice No: ${invoice.invoice_number}`, { x: 50, y, size: 11, font: boldFont });
-    page.drawText(`Date: ${invoice.invoice_date}`, { x: 400, y, size: 11, font });
-    y -= 20;
-    page.drawText(`Status: ${invoice.status.toUpperCase()}`, { x: 400, y, size: 11, font });
-    y -= 30;
+      // Invoice details
+      page.drawText(`Invoice No: ${invoice.invoice_number}`, { x: 50, y, size: 11, font: boldFont });
+      page.drawText(`Date: ${invoice.invoice_date}`, { x: 400, y, size: 11, font });
+      y -= 20;
+      page.drawText(`Status: ${invoice.status.toUpperCase()}`, { x: 400, y, size: 11, font });
+      y -= 30;
 
-    // Client details
-    if (client) {
-      page.drawText("Bill To:", { x: 50, y, size: 11, font: boldFont });
+      // Client details
+      if (client) {
+        page.drawText("Bill To:", { x: 50, y, size: 11, font: boldFont });
+        y -= 18;
+        // Sanitize text to remove unsupported characters
+        const cleanName = client.name.replace(/[^\x00-\x7F]/g, "");
+        page.drawText(cleanName, { x: 50, y, size: 11, font });
+        y -= 15;
+        if (client.pan) {
+          page.drawText(`PAN: ${client.pan}`, { x: 50, y, size: 10, font });
+          y -= 15;
+        }
+        if (client.address) {
+          const cleanAddress = client.address.replace(/[^\x00-\x7F]/g, "");
+          page.drawText(cleanAddress, { x: 50, y, size: 10, font });
+          y -= 15;
+        }
+      }
+      y -= 30;
+
+      // Table header
+      page.drawRectangle({ x: 50, y: y - 5, width: 495, height: 25, color: rgb(0.95, 0.95, 0.95) });
+      page.drawText("Description", { x: 55, y, size: 10, font: boldFont });
+      page.drawText("HSN", { x: 250, y, size: 10, font: boldFont });
+      page.drawText("Qty", { x: 310, y, size: 10, font: boldFont });
+      page.drawText("Rate", { x: 360, y, size: 10, font: boldFont });
+      page.drawText("Tax", { x: 420, y, size: 10, font: boldFont });
+      page.drawText("Amount", { x: 475, y, size: 10, font: boldFont });
+      y -= 30;
+
+      // Since we don't have items in the invoice object, show summary
+      page.drawText("Service Charges", { x: 55, y, size: 10, font });
+      page.drawText("-", { x: 250, y, size: 10, font });
+      page.drawText("1", { x: 310, y, size: 10, font });
+      page.drawText(`Rs. ${Number(invoice.subtotal).toLocaleString("en-IN")}`, { x: 360, y, size: 10, font });
+      page.drawText(`Rs. ${Number(invoice.tax_amount).toLocaleString("en-IN")}`, { x: 420, y, size: 10, font });
+      page.drawText(`Rs. ${Number(invoice.total).toLocaleString("en-IN")}`, { x: 475, y, size: 10, font });
+      y -= 50;
+
+      // Totals
+      page.drawLine({ start: { x: 350, y: y + 20 }, end: { x: 545, y: y + 20 }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
+      page.drawText("Subtotal:", { x: 360, y, size: 10, font });
+      page.drawText(`Rs. ${Number(invoice.subtotal).toLocaleString("en-IN")}`, { x: 475, y, size: 10, font });
       y -= 18;
-      page.drawText(client.name, { x: 50, y, size: 11, font });
-      y -= 15;
-      if (client.pan) {
-        page.drawText(`PAN: ${client.pan}`, { x: 50, y, size: 10, font });
-        y -= 15;
-      }
-      if (client.address) {
-        page.drawText(client.address, { x: 50, y, size: 10, font });
-        y -= 15;
-      }
+      page.drawText("Tax:", { x: 360, y, size: 10, font });
+      page.drawText(`Rs. ${Number(invoice.tax_amount).toLocaleString("en-IN")}`, { x: 475, y, size: 10, font });
+      y -= 18;
+      page.drawText("Total:", { x: 360, y, size: 12, font: boldFont });
+      page.drawText(`Rs. ${Number(invoice.total).toLocaleString("en-IN")}`, { x: 475, y, size: 12, font: boldFont });
+
+      // Footer
+      page.drawText("Thank you for your business!", { x: 220, y: 50, size: 10, font, color: rgb(0.5, 0.5, 0.5) });
+
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([new Uint8Array(pdfBytes)], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${invoice.invoice_number}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      toast({ title: "Downloaded", description: `${invoice.invoice_number}.pdf saved` });
+    } catch (error) {
+      console.error("PDF Generation Error:", error);
+      toast({ 
+        title: "PDF Generation Failed", 
+        description: "Could not generate PDF. Please check console for details.", 
+        variant: "destructive" 
+      });
     }
-    y -= 30;
-
-    // Table header
-    page.drawRectangle({ x: 50, y: y - 5, width: 495, height: 25, color: rgb(0.95, 0.95, 0.95) });
-    page.drawText("Description", { x: 55, y, size: 10, font: boldFont });
-    page.drawText("HSN", { x: 250, y, size: 10, font: boldFont });
-    page.drawText("Qty", { x: 310, y, size: 10, font: boldFont });
-    page.drawText("Rate", { x: 360, y, size: 10, font: boldFont });
-    page.drawText("Tax", { x: 420, y, size: 10, font: boldFont });
-    page.drawText("Amount", { x: 475, y, size: 10, font: boldFont });
-    y -= 30;
-
-    // Since we don't have items in the invoice object, show summary
-    page.drawText("Service Charges", { x: 55, y, size: 10, font });
-    page.drawText("-", { x: 250, y, size: 10, font });
-    page.drawText("1", { x: 310, y, size: 10, font });
-    page.drawText(`₹${Number(invoice.subtotal).toLocaleString("en-IN")}`, { x: 360, y, size: 10, font });
-    page.drawText(`₹${Number(invoice.tax_amount).toLocaleString("en-IN")}`, { x: 420, y, size: 10, font });
-    page.drawText(`₹${Number(invoice.total).toLocaleString("en-IN")}`, { x: 475, y, size: 10, font });
-    y -= 50;
-
-    // Totals
-    page.drawLine({ start: { x: 350, y: y + 20 }, end: { x: 545, y: y + 20 }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
-    page.drawText("Subtotal:", { x: 360, y, size: 10, font });
-    page.drawText(`₹${Number(invoice.subtotal).toLocaleString("en-IN")}`, { x: 475, y, size: 10, font });
-    y -= 18;
-    page.drawText("Tax:", { x: 360, y, size: 10, font });
-    page.drawText(`₹${Number(invoice.tax_amount).toLocaleString("en-IN")}`, { x: 475, y, size: 10, font });
-    y -= 18;
-    page.drawText("Total:", { x: 360, y, size: 12, font: boldFont });
-    page.drawText(`₹${Number(invoice.total).toLocaleString("en-IN")}`, { x: 475, y, size: 12, font: boldFont });
-
-    // Footer
-    page.drawText("Thank you for your business!", { x: 220, y: 50, size: 10, font, color: rgb(0.5, 0.5, 0.5) });
-
-    const pdfBytes = await pdfDoc.save();
-    const blob = new Blob([new Uint8Array(pdfBytes)], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${invoice.invoice_number}.pdf`;
-    link.click();
-    URL.revokeObjectURL(url);
-    
-    toast({ title: "Downloaded", description: `${invoice.invoice_number}.pdf saved` });
   };
 
   const loading = clientsLoading || invoicesLoading;
@@ -509,3 +523,4 @@ export default function Billing() {
     </div>
   );
 }
+
