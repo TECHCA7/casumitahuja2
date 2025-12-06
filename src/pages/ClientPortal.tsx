@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -12,11 +13,23 @@ import { Link } from "react-router-dom";
 export default function ClientPortal() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     pan: "",
     clientCode: "",
   });
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      // Check if we are already on the documents page to avoid loops
+      if (window.location.pathname !== "/documents") {
+        // navigate("/documents"); // Use navigate for soft redirect if already logged in
+      }
+    }
+  }, [user, navigate]);
+
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,7 +75,14 @@ export default function ClientPortal() {
           return;
         }
 
+        // Cache role for immediate access
+        localStorage.setItem("user_role", "client");
+        localStorage.setItem("client_id", client.client_id);
+
         toast({ title: `Welcome back, ${client.client_name}!` });
+        console.log("Login successful, redirecting...");
+        
+        // Use navigate instead of window.location to keep state if possible, but force if needed
         navigate("/documents");
       } else {
         // No user_id means client hasn't logged in before - create or sign in
@@ -88,7 +108,12 @@ export default function ClientPortal() {
             _role: "client",
           });
 
+          // Cache role
+          localStorage.setItem("user_role", "client");
+          localStorage.setItem("client_id", client.client_id);
+
           toast({ title: `Welcome back, ${client.client_name}!` });
+          
           navigate("/documents");
           return;
         }
@@ -123,12 +148,30 @@ export default function ClientPortal() {
         });
 
         // Link client to auth account
-        await supabase.from("client_auth").insert({
+        const { error: linkError } = await supabase.from("client_auth").insert({
           client_id: client.client_id,
           user_id: signUpData.user.id,
         });
 
+        if (linkError) {
+          console.error("Error linking client:", linkError);
+          toast({
+            title: "Account created but linking failed",
+            description: linkError.message,
+            variant: "destructive",
+          });
+          // Don't return, try to navigate anyway, maybe it was already linked?
+        } else {
+          console.log("Client linked successfully");
+        }
+
+        // Cache role
+        localStorage.setItem("user_role", "client");
+        localStorage.setItem("client_id", client.client_id);
+
         toast({ title: `Welcome, ${client.client_name}!` });
+        console.log("Signup successful, redirecting...");
+        
         navigate("/documents");
       }
     } catch (error) {

@@ -20,12 +20,16 @@ export function AppLayout() {
   }
 
   if (!user) {
+    console.log("AppLayout: No user found, redirecting to /auth");
+    // If we are trying to access a client route, maybe we should go to client portal?
+    // But we don't know if the user INTENDED to be a client.
     return <Navigate to="/auth" replace />;
   }
 
   // Restrict client access to certain pages
   const clientAllowedPaths = ["/documents", "/tax-calculator", "/pdf-tools", "/ocr"];
   if (isClient && !clientAllowedPaths.includes(location.pathname)) {
+    console.log("AppLayout: Client restricted from", location.pathname, "redirecting to /documents");
     return <Navigate to="/documents" replace />;
   }
 
