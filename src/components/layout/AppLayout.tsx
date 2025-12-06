@@ -21,8 +21,8 @@ export function AppLayout() {
 
   if (!user) {
     console.log("AppLayout: No user found, redirecting to /auth");
-    // If we are trying to access a client route, maybe we should go to client portal?
-    // But we don't know if the user INTENDED to be a client.
+    // Add a toast to debug why we are redirecting
+    // toast({ title: "Debug: Redirecting to Login", description: "No user session found in AppLayout" });
     return <Navigate to="/auth" replace />;
   }
 

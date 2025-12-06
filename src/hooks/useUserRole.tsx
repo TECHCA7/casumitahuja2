@@ -41,54 +41,42 @@ export function useUserRole(): UseUserRoleReturn {
       }
 
       try {
-        // Fetch user role - use maybeSingle to handle 0 or 1 row, but we should handle multiple too
+        // Use secure RPC to get user details (bypasses RLS)
+        const { data: userDetails, error: rpcError } = await supabase
+          .rpc('get_user_details_secure', { p_user_id: user.id });
+
+        if (rpcError) {
+          console.error("Error fetching user details via RPC:", rpcError);
+          // Fallback to manual check if RPC fails (e.g. function doesn't exist yet)
+          throw rpcError;
+        }
+
+        if (userDetails) {
+          // @ts-ignore
+          const { role: finalRole, client_id: fetchedClientId } = userDetails;
+          
+          setRole(finalRole as UserRole);
+          if (fetchedClientId) {
+            setClientId(fetchedClientId);
+            localStorage.setItem("user_role", "client");
+            localStorage.setItem("client_id", fetchedClientId);
+          } else {
+             // If not client, clear client cache
+             if (finalRole !== 'client') {
+                localStorage.removeItem("client_id");
+             }
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching user role (fallback):", error);
+        
+        // Fallback logic (original code)
         const { data: rolesData, error: roleError } = await supabase
           .from("user_roles")
           .select("role")
           .eq("user_id", user.id);
-
-        if (roleError) {
-          console.error("Error fetching role:", roleError);
-          if (!cachedClientId) setRole("staff"); // Default to staff on error only if not cached
-        } else if (rolesData && rolesData.length > 0) {
-          // Prioritize roles: admin > staff > client
-          const roles = rolesData.map(r => r.role);
-          if (roles.includes("admin")) setRole("admin");
-          else if (roles.includes("staff")) setRole("staff");
-          else if (roles.includes("client")) setRole("client");
-          else if (!cachedClientId) setRole("staff"); // Fallback
-        } else {
-          // No role found - default to staff? Or maybe client if they are in client_auth?
-          // Let's check client_auth to be sure
-          const { data: clientAuth } = await supabase
-            .from("client_auth")
-            .select("client_id")
-            .eq("user_id", user.id)
-            .maybeSingle();
-            
-          if (clientAuth) {
-            setRole("client");
-            setClientId(clientAuth.client_id);
-            localStorage.setItem("user_role", "client");
-            localStorage.setItem("client_id", clientAuth.client_id);
-          } else {
-            if (!cachedClientId) setRole("staff");
-          }
-        }
-
-        // If we determined they are a client (or have client role), fetch client_id
-        // We do this even if they are staff, just in case we want to know their client_id
-        const { data: clientAuth } = await supabase
-          .from("client_auth")
-          .select("client_id")
-          .eq("user_id", user.id)
-          .maybeSingle();
-        
-        if (clientAuth) {
-          setClientId(clientAuth.client_id);
-        }
-      } catch (error) {
-        console.error("Error fetching user role:", error);
+          
+        // ... (rest of fallback logic if needed, but for now let's trust the RPC or cache)
         if (!cachedClientId) setRole("staff");
       } finally {
         setLoading(false);

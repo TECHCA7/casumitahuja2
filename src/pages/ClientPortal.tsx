@@ -15,6 +15,7 @@ export default function ClientPortal() {
   const { toast } = useToast();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [formData, setFormData] = useState({
     pan: "",
     clientCode: "",
@@ -23,10 +24,13 @@ export default function ClientPortal() {
   // Redirect if already logged in
   useEffect(() => {
     if (user) {
-      // Check if we are already on the documents page to avoid loops
-      if (window.location.pathname !== "/documents") {
-        // navigate("/documents"); // Use navigate for soft redirect if already logged in
-      }
+      console.log("ClientPortal: User detected via hook:", user.id);
+      console.log("ClientPortal: Redirecting to /documents in 500ms...");
+      // Small delay to ensure state propagation
+      const timer = setTimeout(() => {
+          navigate("/documents");
+      }, 500);
+      return () => clearTimeout(timer);
     }
   }, [user, navigate]);
 
@@ -60,10 +64,14 @@ export default function ClientPortal() {
         // Use a standard domain to avoid validation errors
         const clientEmail = `${formData.pan.toLowerCase().trim()}@client.app`;
         
-        const { error: signInError } = await supabase.auth.signInWithPassword({
+        console.log("Attempting login for:", clientEmail);
+
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
           email: clientEmail,
           password: `client_${client.client_id}_${formData.clientCode}`,
         });
+
+        console.log("Sign in result:", { signInData, signInError });
 
         if (signInError) {
           toast({
@@ -75,19 +83,39 @@ export default function ClientPortal() {
           return;
         }
 
+        if (!signInData.session) {
+             console.error("Login successful but no session returned in data!");
+             toast({
+                title: "Login Error",
+                description: "Server did not return a session. Please try again.",
+                variant: "destructive"
+             });
+             setLoading(false);
+             return;
+        }
+
+        // Explicitly set the session to ensure persistence
+        if (signInData.session) {
+            const { error: setSessionError } = await supabase.auth.setSession(signInData.session);
+            if (setSessionError) console.error("Error setting session:", setSessionError);
+        }
+
         // Cache role for immediate access
         localStorage.setItem("user_role", "client");
         localStorage.setItem("client_id", client.client_id);
 
         toast({ title: `Welcome back, ${client.client_name}!` });
-        console.log("Login successful, redirecting...");
+        console.log("Login successful, session obtained. Waiting for auth state...");
         
-        // Use navigate instead of window.location to keep state if possible, but force if needed
-        navigate("/documents");
+        // We do NOT navigate here. We wait for the useAuth hook to detect the user.
+        // This ensures the global state is updated before we change routes.
+
       } else {
         // No user_id means client hasn't logged in before - create or sign in
         const clientEmail = `${formData.pan.toLowerCase().trim()}@client.app`;
-        const clientPassword = `client_${client.client_id}_${formData.clientCode}`;
+        const clientPassword = `client_${client.client_id}_${formData.clientCode.trim()}`;
+
+        console.log("Attempting login with:", clientEmail);
 
         // First try to sign in (in case user exists but client_auth link is missing)
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
@@ -95,12 +123,28 @@ export default function ClientPortal() {
           password: clientPassword,
         });
 
+        if (signInError) {
+          console.log("Sign in failed (expected if new user):", signInError.message);
+          if (signInError.message.includes("Email not confirmed")) {
+            toast({
+              title: "Login Failed",
+              description: "Account exists but email is not confirmed. Please ask Admin to disable 'Confirm Email' in Supabase settings.",
+              variant: "destructive",
+            });
+            setLoading(false);
+            return;
+          }
+        }
+
         if (!signInError && signInData.user) {
+          console.log("Sign in successful, linking client...");
           // User exists - link them to client_auth if not already linked
-          await supabase.from("client_auth").upsert({
+          const { error: linkError } = await supabase.from("client_auth").upsert({
             client_id: client.client_id,
             user_id: signInData.user.id,
           }, { onConflict: "client_id" });
+
+          if (linkError) console.error("Link error (existing user):", linkError);
 
           // Ensure role is set to client
           await supabase.rpc("set_user_role", {
@@ -114,7 +158,7 @@ export default function ClientPortal() {
 
           toast({ title: `Welcome back, ${client.client_name}!` });
           
-          navigate("/documents");
+          // Wait for hook
           return;
         }
 
@@ -132,6 +176,7 @@ export default function ClientPortal() {
         });
 
         if (signUpError || !signUpData.user) {
+          console.error("Sign up error:", signUpError);
           toast({
             title: "Login failed",
             description: signUpError?.message || "Unable to create account.",
@@ -141,6 +186,21 @@ export default function ClientPortal() {
           return;
         }
 
+        if (!signUpData.session) {
+           console.warn("User created but no session returned. Email confirmation might be required or user already exists with different password.");
+           // If we don't have a session, we can't link the user via RLS.
+           // We should try to sign in again if possible, or alert the user.
+           if (signInError) {
+             toast({
+               title: "Login Failed",
+               description: "User exists but password incorrect, or email confirmation required.",
+               variant: "destructive"
+             });
+             setLoading(false);
+             return;
+           }
+        }
+
         // Set user role to client using secure function
         await supabase.rpc("set_user_role", {
           _user_id: signUpData.user.id,
@@ -148,10 +208,11 @@ export default function ClientPortal() {
         });
 
         // Link client to auth account
-        const { error: linkError } = await supabase.from("client_auth").insert({
+        // Use upsert to avoid unique constraint violations if it already exists
+        const { error: linkError } = await supabase.from("client_auth").upsert({
           client_id: client.client_id,
           user_id: signUpData.user.id,
-        });
+        }, { onConflict: 'client_id' });
 
         if (linkError) {
           console.error("Error linking client:", linkError);
@@ -170,9 +231,9 @@ export default function ClientPortal() {
         localStorage.setItem("client_id", client.client_id);
 
         toast({ title: `Welcome, ${client.client_name}!` });
-        console.log("Signup successful, redirecting...");
+        console.log("Signup successful, checking session...");
         
-        navigate("/documents");
+        // Wait for hook
       }
     } catch (error) {
       console.error("Login error:", error);
@@ -188,6 +249,15 @@ export default function ClientPortal() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-4">
+      {redirecting && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto" />
+            <h2 className="text-xl font-semibold">Redirecting to Dashboard...</h2>
+            <p className="text-muted-foreground">Please wait while we secure your session.</p>
+          </div>
+        </div>
+      )}
       <div className="w-full max-w-md animate-slide-up">
         {/* Firm Branding */}
         <div className="text-center mb-8">
